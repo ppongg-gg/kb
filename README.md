@@ -1,4 +1,4 @@
-﻿# kb
+# kb
 
 An LLM-powered personal knowledge base. Drop raw documents into a vault, compile them into a structured wiki with Claude, then query that wiki with a Claude agent.
 
@@ -24,45 +24,87 @@ The vault is an Obsidian-compatible folder — open it directly in Obsidian to b
 
 **Requirements**: Python 3.12+, [uv](https://docs.astral.sh/uv/)
 
+### Option A — global install (recommended)
+
+Install `kb` as a global tool so it works from any directory:
+
+```bash
+git clone ...
+cd kb
+uv tool install .
+```
+
+Then configure it once:
+
+```bash
+kb config --vault /absolute/path/to/your/vault
+kb config --api-key sk-ant-...
+```
+
+Settings are saved to `~/.kb` and applied on every `kb` invocation.
+
+### Option B — project-local
+
 ```bash
 git clone ...
 cd kb
 uv sync
 ```
 
-Add your API key to `.env`:
+Add your API key and vault path to `.env` at the project root:
+
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 KB_VAULT=./vault
 ```
 
+Use `uv run kb <command>` instead of `kb` throughout.
+
 ## Usage
 
 ### 1. Add source documents
 
-Drop files into `vault/raw/`:
-- `vault/raw/articles/` -- markdown files (works great with Obsidian Web Clipper)
-- `vault/raw/pdfs/` -- PDF papers
-- `vault/raw/images/` -- figures, screenshots, diagrams
+**Copy files in** — routes by file type automatically:
+
+```bash
+kb add paper.pdf note.md screenshot.png
+```
+
+- `.md`, `.txt` → `raw/articles/`
+- `.pdf` → `raw/pdfs/`
+- `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif` → `raw/images/`
+
+**Fetch a YouTube transcript**:
+
+```bash
+kb add-youtube "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Downloads the transcript, groups it into timestamped paragraphs, and saves it as `raw/articles/<title>.md`. No YouTube API key needed.
+
+**Or drop files manually** into the appropriate subfolder:
+- `vault/raw/articles/` — markdown files (works great with [Obsidian Web Clipper](https://obsidian.md/clipper))
+- `vault/raw/pdfs/` — PDF papers
+- `vault/raw/images/` — figures, screenshots, diagrams
 
 ### 2. Compile the wiki
 
 ```bash
-uv run kb compile
+kb compile
 ```
 
-Subsequent runs are incremental -- only changed files are re-summarised. Force a full rebuild:
+Subsequent runs are incremental — only changed files are re-summarised. Force a full rebuild:
 
 ```bash
-uv run kb compile --full
+kb compile --full
 ```
 
 ### 3. Ask questions
 
 ```bash
-uv run kb ask "What are the key concepts in my research?"
-uv run kb ask "How does multi-head attention relate to scaling laws?"
-uv run kb ask "Summarise the main findings across all papers"
+kb ask "What are the key concepts in my research?"
+kb ask "How does multi-head attention relate to scaling laws?"
+kb ask "Summarise the main findings across all papers"
 ```
 
 Answers are printed to the terminal and saved as markdown files in `vault/outputs/`, ready to view in Obsidian.
@@ -70,10 +112,22 @@ Answers are printed to the terminal and saved as markdown files in `vault/output
 ### Optional: ingest only (no LLM calls)
 
 ```bash
-uv run kb ingest
+kb ingest
 ```
 
 Useful to preview what files will be processed and check which have changed.
+
+## Configuration
+
+`kb config` shows or updates the global config stored in `~/.kb`:
+
+```bash
+kb config                               # show current settings
+kb config --vault /path/to/vault        # set default vault
+kb config --api-key sk-ant-...          # set API key
+```
+
+You can also set `KB_VAULT` and `ANTHROPIC_API_KEY` in a `.env` file in your working directory — local `.env` values override the global `~/.kb` config.
 
 ## Vault as an Obsidian vault
 
@@ -102,9 +156,9 @@ Using default models (Haiku + Sonnet):
 | Concept synthesis | claude-sonnet-4-6 |
 | Q&A agent | claude-haiku-4-5-20251001 |
 
-Override vault path with `--vault`:
+Override vault path per-command with `--vault`:
 ```bash
-uv run kb compile --vault /path/to/my/vault
+kb compile --vault /path/to/my/vault
 ```
 
 ## Project layout
@@ -112,13 +166,14 @@ uv run kb compile --vault /path/to/my/vault
 ```
 kb/
 ├── kb/
-│   ├── cli.py       # entry point
+│   ├── cli.py       # entry point: ingest, compile, add, add-youtube, ask, config
 │   ├── models.py    # pydantic data models
-│   ├── utils.py     # shared client, vault helpers
+│   ├── utils.py     # shared client, vault helpers, global config
 │   ├── ingest.py    # document ingestion + hashing
 │   ├── compile.py   # LLM compilation pipeline
 │   ├── index.py     # index generation
-│   └── agent.py     # Q&A agent
+│   ├── agent.py     # Q&A agent
+│   └── youtube.py   # YouTube transcript fetching
 └── vault/           # your Obsidian vault
     ├── raw/
     ├── wiki/
