@@ -252,7 +252,8 @@ def compile_wiki(vault: Path, full: bool = False) -> None:
     changed_count = sum(
         1 for d in docs if state.summary_hashes.get(d.rel_path) != d.md5
     )
-    any_changed = full or changed_count > 0
+    concepts_missing = not any((wiki_path / "concepts").glob("*.md"))
+    any_changed = full or changed_count > 0 or concepts_missing
 
     summaries = run_phase1(client, vault, docs, state, force=full)
     save_state(wiki_path, state)
