@@ -78,6 +78,19 @@ def add(
         console.print(f"[green]Added:[/green] {src.name} → {dest.relative_to(vault_path)}")
 
 
+@app.command("add-youtube")
+def add_youtube(
+    url: Annotated[str, typer.Argument(help="YouTube video URL")],
+    vault: VaultArg = None,
+) -> None:
+    """Fetch a YouTube transcript and save it as a markdown file in raw/articles/."""
+    from .youtube import add_youtube as _add_youtube
+
+    vault_path = get_vault_path(vault)
+    ensure_vault_structure(vault_path)
+    _add_youtube(vault_path, url)
+
+
 @app.command()
 def ask(
     question: Annotated[str, typer.Argument(help="Question to ask the knowledge base")],
