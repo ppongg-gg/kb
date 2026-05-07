@@ -25,14 +25,16 @@ SUMMARY_SYSTEM = (
 CONCEPT_SYSTEM = (
     "You are a knowledge base architect. Given document summaries, identify concept "
     "clusters and write one article per concept that synthesizes knowledge across sources. "
-    "Output a JSON array (no markdown fences) where each object has:\n"
+    "Output one JSON object per line (JSONL — no surrounding array, no markdown fences). "
+    "Each line must be a complete, self-contained JSON object with these keys:\n"
     '- "slug": kebab-case filename (lowercase, hyphens only, no special chars)\n'
     '- "title": human-readable title\n'
     '- "summary_one_line": one sentence summary\n'
     '- "body": full markdown article body using [[concept-slug]] for internal links '
     "and a ## Sources section with [[wiki/summaries/filename]] backlinks\n"
     '- "tags": list of tag strings\n'
-    '- "source_slugs": list of raw file rel_paths that contributed'
+    '- "source_slugs": list of raw file rel_paths that contributed\n'
+    "Output every concept on its own line. Do not wrap in an array."
 )
 
 _MEDIA_TYPES = {
@@ -45,12 +47,32 @@ _MEDIA_TYPES = {
 
 
 def _parse_json_response(text: str) -> dict | list:
+    """Parse a single JSON object or array (used for Phase 1 summaries)."""
     text = text.strip()
-    # Strip markdown fences if model includes them despite instructions
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
     return json.loads(text)
+
+
+def _parse_jsonl_response(text: str) -> list[dict]:
+    """Parse JSONL output from Phase 2 concept synthesis.
+
+    One JSON object per line. Incomplete lines (truncated output) are skipped,
+    so a token-limit cutoff only loses the last article rather than everything.
+    """
+    articles = []
+    for line in text.splitlines():
+        line = line.strip().rstrip(",")  # tolerate accidental array syntax
+        if not line or line in ("[", "]"):
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                articles.append(obj)
+        except json.JSONDecodeError:
+            pass  # truncated or malformed line — skip silently
+    return articles
 
 
 def summarize_document(client, doc) -> SummaryResult:
@@ -195,13 +217,19 @@ def run_phase2(client, vault: Path, summaries: list[SummaryResult]) -> list[Conc
     try:
         response = client.messages.create(
             model=SONNET,
-            max_tokens=8192,
+            max_tokens=16000,
             system=[{"type": "text", "text": CONCEPT_SYSTEM, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": combined}],
         )
-        data = _parse_json_response(response.content[0].text)
-        if not isinstance(data, list):
-            raise ValueError(f"Expected JSON array, got {type(data)}")
+        raw_text = response.content[0].text
+        data = _parse_jsonl_response(raw_text)
+        if not data:
+            raise ValueError("No concept articles parsed from response")
+        if response.stop_reason == "max_tokens":
+            console.print(
+                f"[yellow]Warning:[/yellow] Concept synthesis hit token limit — "
+                f"{len(data)} article(s) recovered from partial output."
+            )
     except Exception as e:
         console.print(f"[yellow]Warning:[/yellow] Concept synthesis failed: {e}")
         return []
