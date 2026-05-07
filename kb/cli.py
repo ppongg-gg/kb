@@ -5,7 +5,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from .utils import console, ensure_vault_structure, get_vault_path
+from .utils import GLOBAL_CONFIG, console, ensure_vault_structure, get_vault_path
 
 app = typer.Typer(
     name="kb",
@@ -88,6 +88,57 @@ def ask(
 
     vault_path = get_vault_path(vault)
     ask_fn(vault_path, question)
+
+
+@app.command()
+def config(
+    vault: Annotated[Optional[str], typer.Option("--vault", help="Set default vault path")] = None,
+    api_key: Annotated[Optional[str], typer.Option("--api-key", help="Set Anthropic API key")] = None,
+) -> None:
+    """Show or update the global config (~/.kb).
+
+    With no flags: show current resolved values.
+    With flags: write new values into ~/.kb.
+    """
+    import os
+    from .utils import _load_env
+
+    if vault or api_key:
+        # Read existing lines, update or add keys
+        lines: list[str] = []
+        if GLOBAL_CONFIG.exists():
+            lines = GLOBAL_CONFIG.read_text(encoding="utf-8").splitlines()
+
+        def _set(key: str, value: str) -> None:
+            prefix = f"{key}="
+            for i, line in enumerate(lines):
+                if line.startswith(prefix):
+                    lines[i] = f"{key}={value}"
+                    return
+            lines.append(f"{key}={value}")
+
+        if vault:
+            _set("KB_VAULT", str(Path(vault).resolve()))
+        if api_key:
+            _set("ANTHROPIC_API_KEY", api_key)
+
+        GLOBAL_CONFIG.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        console.print(f"[green]Saved[/green] → {GLOBAL_CONFIG}")
+
+    # Always show current state after applying changes
+    _load_env()
+    resolved_vault = os.environ.get("KB_VAULT", "[not set]")
+    raw_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    masked_key = (raw_key[:12] + "..." + raw_key[-4:]) if len(raw_key) > 16 else ("[not set]" if not raw_key else raw_key)
+
+    from rich.table import Table
+    t = Table(show_header=False, box=None, padding=(0, 2))
+    t.add_column(style="dim")
+    t.add_column()
+    t.add_row("Config file", str(GLOBAL_CONFIG))
+    t.add_row("KB_VAULT", resolved_vault)
+    t.add_row("ANTHROPIC_API_KEY", masked_key)
+    console.print(t)
 
 
 if __name__ == "__main__":

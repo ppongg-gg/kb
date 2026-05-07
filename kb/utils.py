@@ -19,6 +19,10 @@ if sys.platform == "win32" and hasattr(sys.stderr, "reconfigure"):
 
 console = Console(legacy_windows=False)
 
+# Global config file — set KB_VAULT and ANTHROPIC_API_KEY here once so every
+# command works from any directory without a local .env.
+GLOBAL_CONFIG = Path.home() / ".kb"
+
 _VAULT_SUBDIRS = [
     "raw/articles",
     "raw/pdfs",
@@ -29,12 +33,30 @@ _VAULT_SUBDIRS = [
 ]
 
 
+def _load_env() -> None:
+    """Load config: global ~/.kb first, then .env in cwd if present (cwd wins).
+
+    Deliberately uses an explicit cwd path rather than load_dotenv()'s default
+    find_dotenv() behaviour, which walks up the calling file's directory tree and
+    would always find the project .env regardless of where kb is invoked from.
+    """
+    load_dotenv(GLOBAL_CONFIG, override=False)
+    load_dotenv(Path.cwd() / ".env", override=True)
+
+
 def get_vault_path(vault: str | None) -> Path:
-    load_dotenv()
-    raw = vault or os.environ.get("KB_VAULT") or "vault"
+    _load_env()
+    raw = vault or os.environ.get("KB_VAULT")
+    if not raw:
+        console.print(
+            "[red]Error:[/red] No vault configured.\n"
+            f"Run [bold]kb config[/bold] to set one, or pass [bold]--vault PATH[/bold]."
+        )
+        raise typer.Exit(1)
     p = Path(raw).resolve()
     if not p.exists():
-        raise typer.BadParameter(f"Vault directory not found: {p}")
+        console.print(f"[red]Error:[/red] Vault directory not found: {p}")
+        raise typer.Exit(1)
     return p
 
 
@@ -44,9 +66,12 @@ def ensure_vault_structure(vault: Path) -> None:
 
 
 def get_client() -> anthropic.Anthropic:
-    load_dotenv()
+    _load_env()
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        console.print("[red]Error:[/red] ANTHROPIC_API_KEY not set. Add it to .env or your environment.")
+        console.print(
+            "[red]Error:[/red] ANTHROPIC_API_KEY not set.\n"
+            f"Run [bold]kb config[/bold] to configure it, or set it in your environment."
+        )
         raise typer.Exit(1)
     return anthropic.Anthropic(api_key=key)
